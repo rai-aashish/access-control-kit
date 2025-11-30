@@ -37,7 +37,14 @@ pnpm add access-control-kit
 ### 1. Define Configuration
 
 ```typescript
-// config.ts
+// access-control-config.ts
+// Define your resources and actions
+// in structure {
+//                RESOURCE1: [ACTION1, ACTION2, ...]
+//                RESOURCE2: [ACTION1, ACTION2, ...]
+//                ...
+//               }
+// Use const to ensure type inference
 export const config = {
   POST: ['create', 'read', 'update', 'delete'],
   USER: ['read', 'invite', 'delete'],
@@ -523,15 +530,17 @@ Since `access-control-kit` core is framework-agnostic, you can easily build wrap
 ```typescript
 // useAccessControl.ts
 import { getAccessControl } from 'access-control-kit';
-import { ref, computed } from 'vue';
+import { computed, unref } from 'vue';
 
-export function useAccessControl(policy) {
-  const { can, canAll, canAny } = getAccessControl(policy.value);
+export function useAccessControl(policyRef) {
+  // Re-create access control object when policy changes
+  const accessControl = computed(() => getAccessControl(unref(policyRef)));
   
   return {
-    can: (resource, action, context) => can(resource, action, context),
-    canAll: (resource, actions, context) => canAll(resource, actions, context),
-    canAny: (resource, actions, context) => canAny(resource, actions, context),
+    // Delegate to the current access control instance
+    can: (resource, action, context) => accessControl.value.can(resource, action, context),
+    canAll: (resource, actions, context) => accessControl.value.canAll(resource, actions, context),
+    canAny: (resource, actions, context) => accessControl.value.canAny(resource, actions, context),
   };
 }
 ```
@@ -546,17 +555,23 @@ import { writable, derived } from 'svelte/store';
 export function createAccessControlStore(initialPolicy) {
   const policy = writable(initialPolicy);
   
+  // Derived store that updates whenever policy changes
+  // Returns { can, canAll, canAny, policy }
   const accessControl = derived(policy, $policy => getAccessControl($policy));
   
   return {
     policy,
-    can: (resource, action, context) => {
-      let result;
-      accessControl.subscribe(ac => result = ac.can(resource, action, context))();
-      return result;
-    }
+    subscribe: accessControl.subscribe, // Make it a store
   };
 }
+
+// Usage in component:
+// <script>
+//   import { createAccessControlStore } from './accessControl';
+//   const ac = createAccessControlStore([]);
+// </script>
+//
+// {#if $ac.can('POST', 'read')}...{/if}
 ```
 
 ## TypeScript Support

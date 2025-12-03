@@ -1,7 +1,7 @@
 {
 	"name": "access-control-kit",
 	"description": "Framework-agnostic Policy-based Access Control with React bindings",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"author": "Aashish Rai",
 	"license": "MIT",
 	"keywords": [

@@ -2,9 +2,7 @@
 
 A powerful, type-safe, and **framework-agnostic** access control library. Define your policies once and use them anywhere—Node.js, React, Vue, Svelte, or plain JavaScript.
 
-## Version
-
-Current Version: **0.1.0**
+**[DEMO LINK](https://rai-aashish.github.io/access-control-kit-demo/)**
 
 ## License
 

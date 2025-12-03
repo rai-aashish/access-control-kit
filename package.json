@@ -14,7 +14,10 @@
 		"abac",
 		"permissions"
 	],
-	"repository": "https://github.com/rai-aashish/access-control-kit",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/rai-aashish/access-control-kit.git"
+	},
 	"main": "dist/index.js",
 	"module": "dist/index.mjs",
 	"types": "dist/index.d.ts",

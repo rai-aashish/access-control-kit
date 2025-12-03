@@ -32,82 +32,382 @@ pnpm add access-control-kit
 
 ## Quick Start
 
-### 1. Define Configuration
+This guide shows you how to set up `access-control-kit` in both **bare JavaScript/TypeScript** projects and **React** applications.
+
+---
+
+## Part 1: Bare JavaScript/TypeScript Project
+
+Perfect for Node.js backends, API routes, serverless functions, or any non-React JavaScript environment.
+
+### Step 1: Create Access Control Configuration
+
+Create a centralized `access-control.ts` file to define your resources, actions, and export utilities.
 
 ```typescript
-// access-control-config.ts
+// access-control.ts
+import { getAccessControl, type TAccessControlPolicy } from 'access-control-kit';
+
 // Define your resources and actions
-// in structure {
-//                RESOURCE1: [ACTION1, ACTION2, ...]
-//                RESOURCE2: [ACTION1, ACTION2, ...]
-//                ...
-//               }
-// Use const to ensure type inference
+// Use 'as const' to ensure type inference
 export const config = {
   POST: ['create', 'read', 'update', 'delete'],
   USER: ['read', 'invite', 'delete'],
   SETTINGS: ['view', 'edit'],
 } as const;
+
+// Export the type for use in your app
+export type AccessControlPolicy = TAccessControlPolicy<typeof config>;
+
+// Export the getAccessControl utility
+export { getAccessControl };
 ```
 
-### 2. Define Policy
+### Step 2: Fetch or Define User Policy
+
+Create a utility to fetch or generate the user's access policy based on their role, permissions, or attributes.
 
 ```typescript
-import { TAccessControlPolicy } from 'access-control-kit';
+// utils/getUserPolicy.ts
+import type { AccessControlPolicy } from '../access-control';
 
-const userPolicy: TAccessControlPolicy<typeof config> = [
-  { resource: 'POST', actions: ['read'], effect: 'allow' },
-  { resource: 'POST', actions: ['update'], effect: 'allow', contexts: [{ authorId: 'user-123' }] },
-  { resource: 'POST', actions: ['delete'], effect: 'deny' },
-];
+// Example: Fetch policy from API
+export async function fetchUserPolicy(userId: string): Promise<AccessControlPolicy> {
+  const response = await fetch(`/api/users/${userId}/policy`);
+  return response.json();
+}
+
+// Or define static policies based on roles
+export function getRoleBasedPolicy(role: 'admin' | 'editor' | 'viewer'): AccessControlPolicy {
+  switch (role) {
+    case 'admin':
+      return [{ resource: '*', actions: ['*'], effect: 'allow' }];
+    
+    case 'editor':
+      return [
+        { resource: 'POST', actions: ['create', 'read', 'update'], effect: 'allow' },
+        { resource: 'POST', actions: ['delete'], effect: 'allow', contexts: [{ authorId: 'current-user' }] },
+        { resource: 'USER', actions: ['read'], effect: 'allow' },
+      ];
+    
+    case 'viewer':
+      return [
+        { resource: 'POST', actions: ['read'], effect: 'allow' },
+        { resource: 'USER', actions: ['read'], effect: 'allow' },
+      ];
+    
+    default:
+      return [];
+  }
+}
 ```
 
-### 3. Use in React
+### Step 3: Use in Your Application
+
+```typescript
+// Example: Express.js API route
+import { getAccessControl } from './access-control';
+import { fetchUserPolicy } from './utils/getUserPolicy';
+
+app.post('/api/posts', async (req, res) => {
+  // Get user policy
+  const policy = await fetchUserPolicy(req.user.id);
+  const { can } = getAccessControl(policy);
+  
+  // Check permission
+  if (!can('POST', 'create')) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  
+  // Proceed with creation
+  const post = await createPost(req.body);
+  res.json(post);
+});
+
+// Example: Check with context
+app.delete('/api/posts/:id', async (req, res) => {
+  const policy = await fetchUserPolicy(req.user.id);
+  const post = await getPost(req.params.id);
+  const { can } = getAccessControl(policy);
+  
+  // Check if user can delete (might require ownership)
+  if (!can('POST', 'delete', { authorId: post.authorId })) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  
+  await deletePost(req.params.id);
+  res.json({ success: true });
+});
+
+// Example: Check multiple permissions
+app.get('/api/posts/:id/actions', async (req, res) => {
+  const policy = await fetchUserPolicy(req.user.id);
+  const post = await getPost(req.params.id);
+  const { can, canAll, canAny } = getAccessControl(policy);
+  
+  res.json({
+    canRead: can('POST', 'read'),
+    canUpdate: can('POST', 'update', { authorId: post.authorId }),
+    canDelete: can('POST', 'delete', { authorId: post.authorId }),
+    canManage: canAll('POST', ['update', 'delete'], { authorId: post.authorId }),
+    hasAnyAccess: canAny('POST', ['read', 'update', 'delete']),
+  });
+});
+```
+
+---
+
+## Part 2: React Application
+
+Perfect for React, Next.js, or any React-based frontend application.
+
+### Step 1: Create Access Control Configuration
+
+Create a centralized `access-control.ts` file with React-specific exports.
+
+```typescript
+// access-control.ts
+import { createAccessControl, type TAccessControlPolicy } from 'access-control-kit/react';
+
+// Define your resources and actions
+export const config = {
+  POST: ['create', 'read', 'update', 'delete'],
+  USER: ['read', 'invite', 'delete'],
+  SETTINGS: ['view', 'edit'],
+} as const;
+
+// Export the type for use in your app
+export type AccessControlPolicy = TAccessControlPolicy<typeof config>;
+
+// Create and export React utilities
+export const {
+  AccessControlProvider,
+  useAccessControl,
+  AccessControlGuard,
+  withAccessControl,
+} = createAccessControl(config);
+```
+
+### Step 2: Setup Provider in Your App
+
+Wrap your application with the `AccessControlProvider` and fetch the user's policy.
+
+> [!NOTE]
+> The `isLoading` prop is only meaningful if your policy is **fetched or generated asynchronously**. If you have a static policy or it's already available, you can omit this prop (defaults to `false`).
 
 ```tsx
-import { createAccessControl } from 'access-control-kit/react';
+// App.tsx
+import { useState, useEffect } from 'react';
+import { AccessControlProvider, type AccessControlPolicy } from './access-control';
 
-const { AccessControlProvider, useAccessControl, AccessControlGuard } = createAccessControl(config);
+// Utility to fetch user policy asynchronously
+async function fetchUserPolicy(userId: string): Promise<AccessControlPolicy> {
+  const response = await fetch(`/api/users/${userId}/policy`);
+  return response.json();
+}
 
 function App() {
+  const [policy, setPolicy] = useState<AccessControlPolicy>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  useEffect(() => {
+    // Fetch policy on mount
+    fetchUserPolicy('current-user-id')
+      .then(setPolicy)
+      .finally(() => setIsLoading(false));
+  }, []);
+  
   return (
-    <AccessControlProvider accessControlPolicy={userPolicy}>
-      <MyComponent />
+    <AccessControlProvider accessControlPolicy={policy} isLoading={isLoading}>
+      <Dashboard />
     </AccessControlProvider>
   );
 }
+```
 
-function MyComponent() {
-  const { can } = useAccessControl();
+### Step 3: Use Access Control Utilities
+
+#### A. Using the `useAccessControl` Hook
+
+```tsx
+// components/PostActions.tsx
+import { useAccessControl } from '../access-control';
+
+interface PostActionsProps {
+  post: {
+    id: string;
+    authorId: string;
+    title: string;
+  };
+}
+
+function PostActions({ post }: PostActionsProps) {
+  const { can, canAll, isLoading } = useAccessControl();
+  
+  if (isLoading) {
+    // Show skeleton while policy is loading
+    return (
+      <div className="post-actions">
+        <div className="skeleton skeleton-title" />
+        <div className="skeleton skeleton-button" />
+        <div className="skeleton skeleton-button" />
+      </div>
+    );
+  }
+  
+  const canUpdate = can('POST', 'update', { authorId: post.authorId });
+  const canDelete = can('POST', 'delete', { authorId: post.authorId });
+  const canManage = canAll('POST', ['update', 'delete'], { authorId: post.authorId });
   
   return (
-    <div>
-      {can('POST', 'read') && <button>Read</button>}
+    <div className="post-actions">
+      <h3>{post.title}</h3>
       
-      <AccessControlGuard resource="SETTINGS" action="edit" fallback={<span>No Access</span>}>
-        <button>Edit Settings</button>
+      {canUpdate && (
+        <button onClick={() => editPost(post.id)}>
+          Edit Post
+        </button>
+      )}
+      
+      {canDelete && (
+        <button onClick={() => deletePost(post.id)}>
+          Delete Post
+        </button>
+      )}
+      
+      {canManage && (
+        <button onClick={() => openAdvancedSettings(post.id)}>
+          Advanced Settings
+        </button>
+      )}
+    </div>
+  );
+}
+```
+
+#### B. Using the `AccessControlGuard` Component
+
+```tsx
+// components/SettingsPage.tsx
+import { AccessControlGuard } from '../access-control';
+
+function SettingsPage() {
+  return (
+    <div>
+      <h1>Settings</h1>
+      
+      {/* Standard mode with fallback */}
+      <AccessControlGuard
+        resource="SETTINGS"
+        action="view"
+        fallback={<p>You don't have access to view settings.</p>}
+        loadingFallback={<div className="skeleton skeleton-content" />}
+      >
+        <SettingsContent />
+      </AccessControlGuard>
+      
+      {/* PassThrough mode (render props) */}
+      <AccessControlGuard resource="SETTINGS" action="edit" passThrough>
+        {({ allowed, isLoading }) => (
+          <button 
+            disabled={!allowed || isLoading}
+            onClick={saveSettings}
+          >
+            {isLoading ? 'Checking...' : allowed ? 'Save Settings' : 'Read Only'}
+          </button>
+        )}
       </AccessControlGuard>
     </div>
   );
 }
 ```
 
-### 4. Use in Node.js / API Routes
+#### C. Using the `withAccessControl` HOC
 
-```typescript
-import { getAccessControl } from 'access-control-kit';
+```tsx
+// components/AdminPanel.tsx
+import { withAccessControl } from '../access-control';
 
-export async function POST(req) {
-  const policy = await fetchUserPolicy(req.user.id);
-  const { can } = getAccessControl(policy);
+function AdminPanel() {
+  return (
+    <div>
+      <h1>Admin Panel</h1>
+      <p>Welcome to the admin area!</p>
+    </div>
+  );
+}
 
-  if (!can('POST', 'create')) {
-    return new Response('Forbidden', { status: 403 });
+// Protect the entire component
+export default withAccessControl(
+  AdminPanel,
+  'SETTINGS',
+  'edit',
+  undefined,
+  () => <div>Access Denied: Admin privileges required.</div>,
+  () => <div className="skeleton skeleton-page" />
+);
+```
+
+#### D. Complete Dashboard Example
+
+```tsx
+// components/Dashboard.tsx
+import { useAccessControl, AccessControlGuard } from '../access-control';
+
+function Dashboard() {
+  const { can, canAny, isLoading } = useAccessControl();
+  
+  if (isLoading) {
+    return <div className="skeleton skeleton-dashboard" />;
   }
   
-  // Proceed with creation...
+  return (
+    <div className="dashboard">
+      <h1>Dashboard</h1>
+      
+      {/* Conditional rendering with hook */}
+      {can('POST', 'create') && (
+        <button onClick={createNewPost}>
+          Create New Post
+        </button>
+      )}
+      
+      {/* Guard component for sections */}
+      <AccessControlGuard
+        resource="USER"
+        action="invite"
+        fallback={<p>You cannot invite users.</p>}
+      >
+        <InviteUserForm />
+      </AccessControlGuard>
+      
+      {/* Show section if user has ANY post permission */}
+      {canAny('POST', ['create', 'read', 'update', 'delete']) && (
+        <PostsSection />
+      )}
+      
+      {/* Settings with passThrough */}
+      <AccessControlGuard resource="SETTINGS" action="view" passThrough>
+        {({ allowed }) => (
+          <div className={allowed ? 'settings-enabled' : 'settings-disabled'}>
+            <h2>Settings</h2>
+            {allowed ? <SettingsForm /> : <p>Contact admin for access.</p>}
+          </div>
+        )}
+      </AccessControlGuard>
+    </div>
+  );
 }
 ```
+
+---
+
+## Summary
+
+- **Bare JS/TS**: Use `getAccessControl(policy)` to get `can`, `canAll`, `canAny` utilities
+- **React**: Use `createAccessControl(config)` to get `Provider`, `useAccessControl` hook, `AccessControlGuard` component, and `withAccessControl` HOC
+- **Centralized Config**: Export everything from `access-control.ts` for consistency
+- **Type Safety**: Use `as const` on config for full TypeScript inference
 
 ## Core API (`access-control-kit`)
 

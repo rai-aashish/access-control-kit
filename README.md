@@ -1,3 +1,7 @@
+# Deprecated
+
+This package is deprecated. Please use [access-control-js](https://www.npmjs.com/package/access-control-js) instead.
+
 # Access Control Kit
 
 A powerful, type-safe, and **framework-agnostic** access control library. Define your policies once and use them anywhere—Node.js, React, Vue, Svelte, or plain JavaScript.
